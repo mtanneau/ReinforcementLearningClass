@@ -154,15 +154,16 @@ class Random_walk:
 
 		return
 	
-	def compute_valueFunction_exact(self,algo,nIter_max,verbose=False,history=True,preconditionner=False):
+	def compute_valueFunction_exact(self,algo,nIter_max,v_init=None,verbose=False,history=True,preconditionner=False):
 		
-		v_init=np.zeros(self.nState+1)
-		#v_init=np.random.rand(self.nState+1)
-		v_history=np.zeros(self.nState+1)
+		if( not(v_init == None)):
+			v_init=np.copy(v_init)
+		else:
+			v_init=np.zeros(self.nState+1)
 		
 		nIter=0
 		
-		start_=time.time()
+		start_=time.clock()
 		
 		if(algo=='DP'):
 			#dynamic programming
@@ -176,9 +177,17 @@ class Random_walk:
 			#gradient descent with adaptive momentum, default parameters
 			nIter, v_history=algos_QP.gradientDescent_adaptiveMomentum(self.A_exact,self.b_exact,v_init,nIter_max,history=history)
 			
-		elif(algo=='GD_ADAM'):
+		elif(algo=='ADAM'):
 			#gradient descent, ADAM
-			nIter, v_history=algos_QP.gradientDescent_ADAM(self.A_exact,self.b_exact,v_init,nIter_max,history=history)
+			nIter, v_history=algos_QP.ADAM(self.A_exact,self.b_exact,v_init,nIter_max,history=history)
+		
+		elif(algo=='AdaGrad'):
+			#gradient descent, AdaGrad
+			nIter, v_history=algos_QP.AdaGrad(self.A_exact,self.b_exact,v_init,nIter_max,history=history)
+			
+		elif(algo=='RMSProp'):
+			#gradient descent, AdaGrad
+			nIter, v_history=algos_QP.RMSProp(self.A_exact,self.b_exact,v_init,nIter_max,history=history)
 			
 		elif(algo=='CG'):
 			#conjugate gradient
@@ -187,12 +196,12 @@ class Random_walk:
 											   v_init,nIter_max,history=history,
 											   pre_cond_given=preconditionner,C=np.eye(self.nState+1)+self.P_bellman)
 		
-		end_ = time.time()
+		end_ = time.clock()
 		
 		if(verbose):
 			print 'Algo:',algo,'\t | Time (s):',end_-start_, '\t | #Iter:', nIter, '\t | T/iter:', (end_-start_)/nIter
 		
-		return v_history
+		return nIter,end_-start_,v_history
 	
 	def compute_valueFunction_approx(self,algo,nIter_max,verbose=False,alpha=1.0,history=True,preconditionner=False):
 		
@@ -204,7 +213,7 @@ class Random_walk:
 			theta_history=np.zeros(self.nFeatures+1)
 		nIter=0
 		
-		start_=time.time()
+		start_=time.clock()
 		
 		if(algo=='DP'):
 			#dynamic programming
@@ -220,22 +229,27 @@ class Random_walk:
 			nIter, theta_history=algos_QP.gradientDescent_adaptiveMomentum(self.A_approx,self.b_approx,theta_init,
 																  nIter_max,0.8,0.1,history=history)
 			
-		elif(algo=='GD_ADAM'):
+		elif(algo=='ADAM'):
 			#gradient descent, ADAM
-			nIter, theta_history=algos_QP.gradientDescent_ADAM(self.A_approx,self.b_approx,theta_init,nIter_max,history=history)
-			
+			nIter, theta_history=algos_QP.ADAM(self.A_approx,self.b_approx,theta_init,nIter_max,history=history)
+		
+		elif(algo=='AdaGrad'):
+			#gradient descent, AdaGrad
+			nIter, theta_history=algos_QP.AdaGrad(self.A_approx,self.b_approx,theta_init,nIter_max,history=history)
+		
+		
 		elif(algo=='CG'):
 			#conjugate gradient
 			nIter, theta_history=algos_QP.conjugateGradient(self.A_approx,self.b_approx,theta_init,nIter_max,
 												   history=history,pre_cond_given=preconditionner,
 												   C=2*np.eye(self.nFeatures+1)-self.A_approx)
 		
-		end_ = time.time()
+		end_ = time.clock()
 		
 		if(verbose):
 			print 'Algo:',algo,'\t | Time (s):',end_-start_, '\t | #Iter:', nIter, '\t | T/iter:', (end_-start_)/nIter
 		
-		return theta_history
+		return nIter,end_-start_,theta_history
 	
 	def run_algo(self,algo,nIter_max,
 				 alpha_=0.01,beta_=0.05,gamma_=0.667,
@@ -246,7 +260,7 @@ class Random_walk:
 				 
 				 verbose=False):
 		
-		start_=time.time()
+		start_=time.clock()
 		
 		
 		if(algo=='TD'):
@@ -265,29 +279,43 @@ class Random_walk:
 			#Gradient-TD
 			theta_history=self.GTD(nIter_max,alpha_=alpha_,beta_=beta_,gamma_=gamma_,
 								   zeta_=zeta_,eta_=eta_,
-								   momentum=momentum,
-								  momentum_type=momentum_type)
+								   momentum=momentum)
 			
 		elif(algo=='GTD2'):
 			#gradient-TD 2 
 			theta_history=self.GTD2(nIter_max,alpha_=alpha_,beta_=beta_,gamma_=gamma_,
 								   zeta_=zeta_,eta_=eta_,
-								   momentum=momentum,
-								  momentum_type=momentum_type)
+								   momentum=momentum)
+		
+		elif(algo=='GTD3'):
+			#gradient-TD 2 
+			theta_history=self.GTD3(nIter_max,alpha_=alpha_,gamma_=gamma_,
+								   momentum=momentum)
 		
 			
 		elif(algo=='TDC'):
 			#TD with gradient correction
 			theta_history=self.TDC(nIter_max,alpha_=alpha_,beta_=beta_,gamma_=gamma_,
 								   zeta_=zeta_,eta_=eta_,
-								   momentum=momentum,
-								  momentum_type=momentum_type)
+								   momentum=momentum)
+			
+		elif(algo=='TDC_AdaGrad'):
+			#TD with gradient correction and AdaGrad adaptive learning rate
+			theta_history=self.TDC_AdaGrad(nIter_max,alpha_=alpha_,beta_=beta_,gamma_=gamma_,
+								   zeta_=zeta_,eta_=eta_,
+								   momentum=momentum)
+		
+		elif(algo=='TDC_ADAM'):
+			#TD with gradient correction
+			theta_history=self.TDC_ADAM(nIter_max,alpha_=alpha_,beta_=beta_,gamma_=gamma_,
+								   zeta_=zeta_,eta_=eta_,
+								   momentum=momentum)
 			
 		else:
 			print 'Error :',algo,'is an unknown algorithm'
 			return np.zeros((nIter_max+1,self.nFeatures+1))
 		
-		end_ = time.time()
+		end_ = time.clock()
 		
 		if(verbose):
 			print 'Algo:',algo,'\t | Time (s):',end_-start_
@@ -351,7 +379,7 @@ class Random_walk:
 	def GTD2(self,nIter_max,
 			alpha_=0.1,beta_=0.5,gamma_=0.9,
 			zeta_=0.75,eta_=0.01,
-			momentum=False,momentum_type='Regular'):
+			momentum_type='None'):
 		
 		theta=np.zeros(self.nFeatures+1)
 		theta_history=np.zeros((nIter_max+1,self.nFeatures+1))
@@ -404,7 +432,7 @@ class Random_walk:
 	def TDC(self,nIter_max,
 			alpha_=0.1,beta_=0.5,gamma_=0.9,
 			zeta_=0.75,eta_=0.01,
-			momentum=False,momentum_type='Regular'):
+			momentum='None'):
 		
 		theta=np.zeros(self.nFeatures+1)
 		theta_history=np.zeros((nIter_max+1,self.nFeatures+1))
@@ -427,12 +455,12 @@ class Random_walk:
 			#beta=alpha_/(k**(zeta_+eta_))
 			delta_w = beta*(delta-phi_now.dot(w))*phi_now
 			
-			if(not(momentum)):
+			if(momentum=='None'):
 				#No momentum
 				#alpha=alpha_/(1.+0.01*k**(zeta_))
 				delta_theta=alpha*delta*phi_now -alpha*self.gamma*(phi_now.T.dot(w))*phi_new
 				
-			elif(momentum_type=='Nesterov'):
+			elif(momentum=='Nesterov'):
 				#Nesterov Momentum
 				
 				#first, compute gradient at interim point
@@ -489,45 +517,60 @@ class Random_walk:
 			 alpha=0.1,
 			 epsilon=1.,
 			 m=1000
-			 ): 
+			 ):
 		
-		m=int(np.sqrt(self.nFeatures+1))
+		m=int(np.sqrt(self.nFeatures+1))/2
 		#m=nIter_max
-		#m=50
+		#m=100
+		#m=10
+		theta_true=np.linalg.inv(self.A_approx).dot(self.b_approx)
+		
+		rnd_gen=np.random.RandomState()
+		rnd_gen.seed(0)
+		
+		batch_size=20*m
 		
 		theta=np.zeros(self.nFeatures+1)
 		theta_history=np.zeros((nIter_max+1,self.nFeatures+1))
 		
-		batch_phi_now=np.zeros((m,self.nFeatures+1))
-		batch_phi_new=np.zeros((m,self.nFeatures+1))
-		batch_reward=np.zeros(m)
+		batch=[() for i in range(batch_size)]
+		
+		#batch_phi_now=np.zeros((m,self.nFeatures+1))
+		#batch_phi_new=np.zeros((m,self.nFeatures+1))
+		#batch_reward=np.zeros(m)
 		
 		memory_b=np.zeros((m+1,self.nFeatures+1))
 		memory_B_phi=np.zeros((m+1,m+1,self.nFeatures+1))
 		
 		b_bis=np.zeros(self.nFeatures+1)
 		d_history=np.nan*np.ones((nIter_max+1,self.nFeatures+1))
+		theta_target_history=np.nan*np.ones((nIter_max+1,self.nFeatures+1))
 	
 		count=0.
 		delta=0.1
 		
-		
-		
-		for k in range(1,nIter_max+1):
-			
+		for k in range(1,batch_size+1):
 			s_now,s_new,phi_now,phi_new,reward=self.perform_transition()
-			#print k, s_now, s_new, reward
-			
+			batch[k-1]=(phi_now,phi_new,reward)
 			b_bis+=(1./k)*(reward*phi_now-b_bis)
+		
+		for k in range(batch_size,nIter_max+1):
+			
+			#observe transition
+			s_now,s_new,phi_now,phi_new,reward=self.perform_transition()
+			
+			#update b
+			b_bis+=(1./k)*(reward*phi_now-b_bis)
+					
+				
+			index=rnd_gen.randint(batch_size,size=m+1)
 			
 			#update the batch
-			batch_phi_now[k%(m),:]=phi_now
-			batch_phi_new[k%(m),:]=phi_new
-			batch_reward[k%(m)]=reward
+			#the new transition replaces a random old one
+			batch[index[m]]=(phi_now,phi_new,reward)
+			#print k, index
 			
-			
-			
-			if(k%(m)==0 and (k>=m)):
+			if( (k%(m)==0 and (k>=m)) or True):
 				
 				memory_b=np.zeros((m+1,self.nFeatures+1))
 				memory_B_phi=np.zeros((m+1,m+1,self.nFeatures+1))
@@ -536,19 +579,29 @@ class Random_walk:
 				
 				#Initialize B_0 * Phi_l, forall l
 				# memory_B_phi[t,l,:] is B_t * Phi_l
+				A=np.zeros((self.nFeatures+1,self.nFeatures+1))
 				for l in range(m):
-					phi_now=batch_phi_now[(k-m+1+l)%m]
+					transition=batch[index[l]]
+					phi_now=transition[0]
+					phi_new=transition[1]
+					reward=transition[2]
 					memory_B_phi[0,l+1,:]=(1./epsilon)*phi_now
-					b_+=batch_reward[(k-m+1+l)%m]*phi_now
-				
-				#memory_b[0,:]=(1./epsilon)*b_
-				memory_b[0,:]=(m/(epsilon))*b_bis
+					b_+=reward*phi_now
+					A+=np.outer(phi_now, phi_now-self.gamma*phi_new)
+					
+				#print count, b_
+				memory_b[0,:]=(1./epsilon)*b_
+				#memory_b[0,:]=(m/(epsilon))*b_bis
 				
 				#now, iteratively compute A^{-1}*b
 				for t in range(1,m+1):
 					
+					transition=batch[index[t-1]]
+					phi_now=transition[0]
+					phi_new=transition[1]
 					#Here, we compute all products B_t * Phi_u
-					u=batch_phi_now[(k-m+t)%m]-self.gamma*batch_phi_new[(k-m+t)%m]
+					
+					u=phi_now-self.gamma*phi_new
 					w=memory_B_phi[t-1,t,:]
 					for l in range(t,m+1):
 						
@@ -565,17 +618,134 @@ class Random_walk:
 					
 					
 				#Restrict the magnitude of updates (similar to using trust-region)
-				d=memory_b[m,:]
+				theta_target=memory_b[m,:]
+				theta_target_history[k]=theta_target
+				#d=memory_b[m,:]-theta
+				#d_=np.linalg.inv(epsilon*np.eye(self.nFeatures+1)+A).dot(m*b_bis)
+				#d_true=-theta+theta_true
+				#print k, theta_target
 				
-				#if(np.linalg.norm(d)>delta):
-					#d=delta*d/np.linalg.norm(d)
+				#update step size
+				#d_before=d_history[k-1]
+				#cos_=d.dot(d_before)/(np.linalg.norm(d)*(np.linalg.norm(d_before)))
+				#print count, cos_
+				#if(cos_<0):
+					#print count, 'Reducing trust radius', cos_
+					#delta=0.9*delta
 				
-				d_history[k]=d
-				theta+=(1./count)*(d-theta)
+				#compute step size
+				#d=delta*d/np.linalg.norm(d)
+				
+				#print count, d.dot(d_true)/(np.linalg.norm(d)*np.linalg.norm(d_true)), cos_
+				
+				#d_history[k]=d
+				theta+=(1./count)*(theta_target-theta)
 				
 				
 			
 			theta_history[k,:]=theta
-
+			
+		#print 'LLSTD-count',count
+		
+		#print np.nanmean(theta_target_history,0)
+		#print np.nanstd(theta_history,0)
+		
+		# plt.plot(b_bis,'b-')
+		# plt.plot(self.b_approx,'r--')
+		plt.plot(np.nanmean(theta_target_history,0))
+		plt.plot(theta_true,'r--')
+		plt.show()
+		
 		return theta_history
 	
+	def TDC_AdaGrad(self,nIter_max,
+			alpha_=0.1,beta_=0.5,gamma_=0.9,
+			zeta_=0.75,eta_=0.01,
+			momentum='None'):
+		
+		theta=np.zeros(self.nFeatures+1)
+		r=np.zeros(self.nFeatures+1)
+		
+		theta_history=np.zeros((nIter_max+1,self.nFeatures+1))
+		
+		w=np.zeros(self.nFeatures+1)
+		
+		beta=beta_
+		alpha=alpha_
+			  
+		for k in range(1,nIter_max+1):
+			
+			#perform transition	
+			s_now,s_new,phi_now,phi_new,reward=self.perform_transition()
+			delta = reward+self.gamma*theta.dot(phi_new)-theta.dot(phi_now)
+			
+			#compute gradient estimate
+			g=-delta*phi_now +self.gamma*(phi_now.T.dot(w))*phi_new
+			
+			#accumulate squarred gradients
+			r+=np.multiply(g,g)
+			
+			#Compute updates
+			delta_theta = -(alpha_/(10**(-7)+np.sqrt(r)))*g
+			delta_w = beta*(delta-phi_now.dot(w))*phi_now
+			
+			#Update theta and w
+			theta += delta_theta
+			w+=delta_w
+			
+			theta_history[k,:]=theta
+		
+		return theta_history
+		
+		
+	def TDC_ADAM(self,nIter_max,
+			alpha_=0.1,beta_=0.5,gamma_=0.9,
+			zeta_=0.75,eta_=0.01,
+			rho1=0.9,rho2=0.999,
+			momentum='None'):
+		
+		theta=np.zeros(self.nFeatures+1)
+		r=np.zeros(self.nFeatures+1)
+		s=np.zeros(self.nFeatures+1)
+		
+		theta_history=np.zeros((nIter_max+1,self.nFeatures+1))
+		
+		w=np.zeros(self.nFeatures+1)
+		
+		beta=beta_
+		alpha=alpha_
+		
+		rho1_t=rho1
+		rho2_t=rho2
+			  
+		for k in range(1,nIter_max+1):
+			
+			#perform transition	
+			s_now,s_new,phi_now,phi_new,reward=self.perform_transition()
+			delta = reward+self.gamma*theta.dot(phi_new)-theta.dot(phi_now)
+			
+			#compute gradient estimate
+			g=-delta*phi_now +self.gamma*(phi_now.T.dot(w))*phi_new
+			
+			#update moments estimates
+			s = rho1*s + (1.-rho1)*g
+			r=rho2*r+(1.-rho2)*np.multiply(g,g)
+			
+			#Correct bias
+			s=s/(1.-rho1_t)
+			r=r/(1.-rho2_t)
+			
+			rho1_t*=rho1
+			rho2_t*=rho2
+			
+			#Compute updates
+			delta_theta = -alpha_*(s/(10**(-8)+np.sqrt(r)))
+			delta_w = beta*(delta-phi_now.dot(w))*phi_now
+			
+			#Update theta and w
+			theta += delta_theta
+			w+=delta_w
+			
+			theta_history[k,:]=theta
+		
+		return theta_history
