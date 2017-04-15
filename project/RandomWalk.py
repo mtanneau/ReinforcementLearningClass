@@ -9,81 +9,41 @@ import algos_QP
 
 class Random_walk:
 	
-	def __init__(self, nState, nStep, nFeatures, d_init,gamma,approx=True):
+	def __init__(self,gamma, nState, nAction, behaviour_policy, d_init, feature_matrix=None):
 		
 		#discount factor
 		self.gamma=gamma
 		
-		#number of states
+		#state and action space
 		self.nState=nState
-		self.nStep=nStep
+		self.nAction=nAction
+		
+		#behaviour policy
+		self.policy=behaviour_policy
+		
+		#feature matrix
+		self.Phi=feature_matrix
 		
 		#transition matrix and reward vector
-		self.P_pi = np.zeros((nState+1,nState+1))
-		self.r_pi=np.zeros(nState+1)
-		self.compute_MDP()
-		#self.r_pi=0.1*np.random.rand(nState+1)+(1./nState)*np.arange(nState+1)
+		#self.P_pi = np.zeros((nState+1,nState+1))
+		#self.r_pi=np.zeros(nState+1)
+		#self.compute_MDP()
 		
 		#initial state distribution
 		self.d_init=d_init
-		self.d_stationnary=self.d_init
-		self.compute_stationnary_distribution()
-		
-		#features
-		self.nFeatures=nFeatures
-		self.Phi=np.eye(nState+1)
-		if(approx):
-			self.create_features() 
-		
-		#Bellman matrix and vector
-		self.P_bellman=self.gamma*self.P_pi
-		self.r_bellman=self.r_pi
-		
-		#A matrix and b vector
-		I=np.eye(nState+1)
-		self.A_exact=I-self.P_bellman
-		self.b_exact=self.r_bellman
-		
-		if(approx):
-			D=np.diag(self.d_stationnary)
-			self.A_approx=(self.Phi).T.dot(D).dot(I-self.P_bellman).dot(self.Phi)
-			self.b_approx=(self.Phi).T.dot(D).dot(self.r_bellman)
-			
-		#finally, initialize value function
-		self.v_pi=np.zeros(nState+1)
-		self.theta=np.zeros(nFeatures+1)
+		#self.d_stationnary=self.d_init
+		#self.compute_stationnary_distribution()
 		
 		#current state
-		self.state=np.random.choice(np.arange(self.nState+1),p=self.d_init)
+		self.current_state=np.random.choice(np.arange(self.nState+1),p=self.d_init)
 		
-	def restart(self):
-		self.state=self.nState/2
-		return
-	
-	def perform_transition(self):
-		
-		s_now=self.state
-		
-		#compute new state
-		s_new=np.random.choice(np.arange(self.nState+1),p=self.P_pi[s_now,:])
-		
-		#compute reward
-		if(s_new>0):
-			r=0
-			self.state=s_new
-		else:
-			if(self.state<self.nStep):
-				r=-1
-			else:
-				r=1
-			#if state is terminal, go to initial state, according to initial distribution
-			self.state=np.random.choice(np.arange(self.nState+1),p=self.d_init)
-		
-		return s_now,s_new,self.Phi[s_now,:],self.Phi[s_new,:],r
-		
-	def compute_MDP(self):
-		"""Compute transition matrix and reward vector for the random walk MDP"""
+		#features
+		if(not feature_matrix==None)
+			self.nFeatures=feature_matrix.shape[1]-1
 
+	@staticmethod
+	def compute_policy(nState, nStep):
+		
 		#Policy is defined as follow:
 		#at each time step, go left or right with 50% prob, and take 1 to nStep steps in that direction 
 		#(with equal probability)
@@ -91,33 +51,68 @@ class Random_walk:
 		#first, we compute the transition matrix P_pi
 		#note that for large values of nState, this can be computationnaly and emmory intensive intensive
 		#sparse matrices should probably be used here
+		
+		P_pi=np.zeros((nState+1,nState+1))
+		r_pi=np.zeros(nState+1)
 
-		rows, cols = np.indices((self.nState+1,self.nState+1))
+		rows, cols = np.indices((nState+1,nState+1))
 
-		for i in range(1,self.nStep+1):
+		for i in range(1,nStep+1):
 			row_vals_up = np.diag(rows, k=i)
 			col_vals_up = np.diag(cols, k=i)
 			row_vals_dw = np.diag(rows, k=-i)
 			col_vals_dw = np.diag(cols, k=-i)
-			self.P_pi[row_vals_up,col_vals_up]+=(1.0/(self.nStep*2.0)) * np.ones(self.nState+1-i)
-			self.P_pi[row_vals_dw,col_vals_dw]+=(1.0/(self.nStep*2.0)) * np.ones(self.nState+1-i)
+			P_pi[row_vals_up,col_vals_up]+=(1.0/(nStep*2.0)) * np.ones(nState+1-i)
+			P_pi[row_vals_dw,col_vals_dw]+=(1.0/(nStep*2.0)) * np.ones(nState+1-i)
 
 		#state 0 is terminal, so we need to correct the corresponding values in P_pi
-		self.P_pi[0,:]=0
-		self.P_pi[:,0]=0
-		self.P_pi[0,0]=1
+		P_pi[0,:]=0.
+		P_pi[:,0]=0.
+		P_pi[0,0]=1.
 
 		#If the agent hits the boundaries, they reach the terminal state
 		#Here we correct the value of P_pi for states are are close to the boundaries
-		self.P_pi[np.arange(1,self.nStep+1),0]=0.5-np.arange(0,self.nStep)/(2.0*self.nStep)
-		self.P_pi[range(self.nState+1-self.nStep,self.nState+1),0]=0.5-np.arange(self.nStep-1,-1,step=-1)/(2.0*self.nStep)
+		P_pi[np.arange(1,nStep+1),0]=0.5-np.arange(0,nStep)/(2.0*nStep)
+		P_pi[range(nState+1-nStep,nState+1),0]=0.5-np.arange(nStep-1,-1,step=-1)/(2.0*nStep)
 
 		#Now, we compute the expected reward vector, r_pi
 		#The reward is +1 if reach right end, -1 if reach left end, 0 otherwise
-		self.r_pi[range(1,self.nStep+1)]=-(0.5-np.arange(0,self.nStep)/(2.0*self.nStep))
-		self.r_pi[range(self.nState+1-self.nStep,self.nState+1)]=0.5-np.arange(self.nStep-1,-1,step=-1)/(2.0*self.nStep)
-
+		r_pi[range(1,nStep+1)]=-(0.5-np.arange(0,nStep)/(2.0*nStep))
+		r_pi[range(nState+1-nStep,nState+1)]=0.5-np.arange(nStep-1,-1,step=-1)/(2.0*nStep)
+		
+		return P_pi,r_pi
+	
+	def restart(self):
+		self.current_state=np.random.choice(np.arange(self.nState+1),p=self.d_init)
 		return
+	
+	def perform_transition(self):
+		
+		s_now=self.current_state
+		
+		#select action
+		a=np.random.choice(np.arange(self.nAction+1),p=self.policy[s_now,:])
+		
+		#probability that this action be taken under behaviour policy
+		mu=self.policy(s_now,a) 
+		
+		#compute new state
+		#here, the action gives the new state directly
+		s_new=a
+		
+		#compute reward
+		if(s_new>0):
+			r=0
+			self.current_state=s_new
+		else:
+			if(self.state<self.nStep):
+				r=-1
+			else:
+				r=1
+			#if state is terminal, go to initial state, according to initial distribution
+			self.restart()
+		
+		return s_now,s_new,self.Phi[s_now,:],self.Phi[s_new,:],r, mu
 
 	def create_features(self):
 		"""Compute features matrix"""
@@ -153,103 +148,6 @@ class Random_walk:
 		self.d_stationnary=d
 
 		return
-	
-	def compute_valueFunction_exact(self,algo,nIter_max,v_init=None,verbose=False,history=True,preconditionner=False):
-		
-		if( not(v_init == None)):
-			v_init=np.copy(v_init)
-		else:
-			v_init=np.zeros(self.nState+1)
-		
-		nIter=0
-		
-		start_=time.clock()
-		
-		if(algo=='DP'):
-			#dynamic programming
-			nIter, v_history=algos_QP.dynamicProgramming(self.P_bellman,self.r_bellman,v_init,nIter_max,history=history)
-			
-		elif(algo=='GD'):
-			#gradient descent with exact linesearch
-			nIter, v_history=algos_QP.gradientDescent(self.A_exact,self.b_exact,v_init,nIter_max,history=history)
-			
-		elif(algo=='GD_am'):
-			#gradient descent with adaptive momentum, default parameters
-			nIter, v_history=algos_QP.gradientDescent_adaptiveMomentum(self.A_exact,self.b_exact,v_init,nIter_max,history=history)
-			
-		elif(algo=='ADAM'):
-			#gradient descent, ADAM
-			nIter, v_history=algos_QP.ADAM(self.A_exact,self.b_exact,v_init,nIter_max,history=history)
-		
-		elif(algo=='AdaGrad'):
-			#gradient descent, AdaGrad
-			nIter, v_history=algos_QP.AdaGrad(self.A_exact,self.b_exact,v_init,nIter_max,history=history)
-			
-		elif(algo=='RMSProp'):
-			#gradient descent, AdaGrad
-			nIter, v_history=algos_QP.RMSProp(self.A_exact,self.b_exact,v_init,nIter_max,history=history)
-			
-		elif(algo=='CG'):
-			#conjugate gradient
-			nIter, v_history=algos_QP.conjugateGradient(self.A_exact,
-											   self.b_exact,
-											   v_init,nIter_max,history=history,
-											   pre_cond_given=preconditionner,C=np.eye(self.nState+1)+self.P_bellman)
-		
-		end_ = time.clock()
-		
-		if(verbose):
-			print 'Algo:',algo,'\t | Time (s):',end_-start_, '\t | #Iter:', nIter, '\t | T/iter:', (end_-start_)/nIter
-		
-		return nIter,end_-start_,v_history
-	
-	def compute_valueFunction_approx(self,algo,nIter_max,verbose=False,alpha=1.0,history=True,preconditionner=False):
-		
-		theta_init=np.zeros(self.nFeatures+1)
-		#theta_init=self.theta+0.0001*np.random.rand(self.nFeatures+1)
-		
-		
-		if(history):
-			theta_history=np.zeros(self.nFeatures+1)
-		nIter=0
-		
-		start_=time.clock()
-		
-		if(algo=='DP'):
-			#dynamic programming
-			nIter, theta_history=algos_QP.dynamicProgramming(np.eye(self.nFeatures+1)-alpha*self.A_approx,
-													alpha*self.b_approx,theta_init,nIter_max,history=history)
-			
-		elif(algo=='GD'):
-			#gradient descent with exact linesearch
-			nIter, theta_history=algos_QP.gradientDescent(self.A_approx,self.b_approx,theta_init,nIter_max,history=history)
-			
-		elif(algo=='GD_am'):
-			#gradient descent with adaptive momentum, default parameters
-			nIter, theta_history=algos_QP.gradientDescent_adaptiveMomentum(self.A_approx,self.b_approx,theta_init,
-																  nIter_max,0.8,0.1,history=history)
-			
-		elif(algo=='ADAM'):
-			#gradient descent, ADAM
-			nIter, theta_history=algos_QP.ADAM(self.A_approx,self.b_approx,theta_init,nIter_max,history=history)
-		
-		elif(algo=='AdaGrad'):
-			#gradient descent, AdaGrad
-			nIter, theta_history=algos_QP.AdaGrad(self.A_approx,self.b_approx,theta_init,nIter_max,history=history)
-		
-		
-		elif(algo=='CG'):
-			#conjugate gradient
-			nIter, theta_history=algos_QP.conjugateGradient(self.A_approx,self.b_approx,theta_init,nIter_max,
-												   history=history,pre_cond_given=preconditionner,
-												   C=2*np.eye(self.nFeatures+1)-self.A_approx)
-		
-		end_ = time.clock()
-		
-		if(verbose):
-			print 'Algo:',algo,'\t | Time (s):',end_-start_, '\t | #Iter:', nIter, '\t | T/iter:', (end_-start_)/nIter
-		
-		return nIter,end_-start_,theta_history
 	
 	def run_algo(self,algo,nIter_max,
 				 alpha_=0.01,beta_=0.05,gamma_=0.667,
@@ -331,7 +229,7 @@ class Random_walk:
 		for k in range(1,nIter_max+1):
 			
 			#perform transition	
-			s_now,s_new,phi_now,phi_new,reward=self.perform_transition()
+			s_now,s_new,phi_now,phi_new,reward, rho =self.perform_transition()
 			delta = reward+self.gamma*theta.dot(phi_new)-theta.dot(phi_now)
 
 			alpha=alpha_/(1.+0.01*k**(zeta_))
@@ -363,7 +261,7 @@ class Random_walk:
 		for k in range(1,nIter_max+1):
 			
 			#perform transition	
-			s_now,s_new,phi_now,phi_new,reward=self.perform_transition()
+			s_now,s_new,phi_now,phi_new,reward, rho=self.perform_transition()
 			delta = reward+self.gamma*theta.dot(phi_new)-theta.dot(phi_now)
 			
 			#update parameter
@@ -391,7 +289,7 @@ class Random_walk:
 		for k in range(1,nIter_max+1):
 			
 			#perform transition	
-			s_now,s_new,phi_now,phi_new,reward=self.perform_transition()
+			s_now,s_new,phi_now,phi_new,reward, rho=self.perform_transition()
 			delta = reward+self.gamma*theta.dot(phi_new)-theta.dot(phi_now)
 			
 			#update parameter
@@ -414,7 +312,7 @@ class Random_walk:
 		for k in range(1,nIter_max+1):
 			
 			#perform transition	
-			s_now,s_new,phi_now,phi_new,reward=self.perform_transition()
+			s_now,s_new,phi_now,phi_new,reward,rho=self.perform_transition()
 			delta = reward+self.gamma*theta.dot(phi_new)-theta.dot(phi_now)
 			
 			#update parameter
@@ -445,7 +343,7 @@ class Random_walk:
 		for k in range(1,nIter_max+1):
 			
 			#perform transition	
-			s_now,s_new,phi_now,phi_new,reward=self.perform_transition()
+			s_now,s_new,phi_now,phi_new,reward,rho=self.perform_transition()
 			delta = reward+self.gamma*theta.dot(phi_new)-theta.dot(phi_now)
 			
 			#compute gradient estimate
@@ -496,7 +394,7 @@ class Random_walk:
 		b_=np.zeros(self.nFeatures+1)
 		
 		for k in range(1,nIter_max+1):
-			s_now,s_new,phi_now,phi_new,reward=self.perform_transition()
+			s_now,s_new,phi_now,phi_new,reward,rho=self.perform_transition()
 			#print k, s_now, s_new, reward
 			
 			v=A_inv.T.dot(phi_now-self.gamma*phi_new)
@@ -550,14 +448,14 @@ class Random_walk:
 		delta=0.1
 		
 		for k in range(1,batch_size+1):
-			s_now,s_new,phi_now,phi_new,reward=self.perform_transition()
+			s_now,s_new,phi_now,phi_new,reward,rho=self.perform_transition()
 			batch[k-1]=(phi_now,phi_new,reward)
 			b_bis+=(1./k)*(reward*phi_now-b_bis)
 		
 		for k in range(batch_size,nIter_max+1):
 			
 			#observe transition
-			s_now,s_new,phi_now,phi_new,reward=self.perform_transition()
+			s_now,s_new,phi_now,phi_new,reward,rho=self.perform_transition()
 			
 			#update b
 			b_bis+=(1./k)*(reward*phi_now-b_bis)
@@ -676,7 +574,7 @@ class Random_walk:
 		for k in range(1,nIter_max+1):
 			
 			#perform transition	
-			s_now,s_new,phi_now,phi_new,reward=self.perform_transition()
+			s_now,s_new,phi_now,phi_new,reward,rho=self.perform_transition()
 			delta = reward+self.gamma*theta.dot(phi_new)-theta.dot(phi_now)
 			
 			#compute gradient estimate
@@ -696,7 +594,6 @@ class Random_walk:
 			theta_history[k,:]=theta
 		
 		return theta_history
-		
 		
 	def TDC_ADAM(self,nIter_max,
 			alpha_=0.1,beta_=0.5,gamma_=0.9,
@@ -721,7 +618,7 @@ class Random_walk:
 		for k in range(1,nIter_max+1):
 			
 			#perform transition	
-			s_now,s_new,phi_now,phi_new,reward=self.perform_transition()
+			s_now,s_new,phi_now,phi_new,reward,rho=self.perform_transition()
 			delta = reward+self.gamma*theta.dot(phi_new)-theta.dot(phi_now)
 			
 			#compute gradient estimate

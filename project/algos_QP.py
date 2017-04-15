@@ -4,12 +4,89 @@ from scipy.stats import chi2
 from scipy.optimize import fsolve
 import time as time
 
+
+def compute_valueFunction(P_pi,r_pi,discountFactor,
+	algo='',nIter_max=0,x_init_=None,alpha=1.0,
+	approx=False,features=None,d_stationnary=None,
+	verbose=False,history=False,preconditionner=False):
+	
+	nIter=0
+	
+	I=np.eye(P_pi.shape[0])
+	A=I-discountFactor*P_pi
+	b=r_pi
+	
+	x_history=0.
+	
+	if(approx):
+		
+		#compute approximate solution of bellamn equation
+		
+		if( not(x_init_ == None)):
+			x_init=np.copy(x_init_)
+		else:
+			x_init=np.zeros(features.shape[1])
+		
+		if(features==None or d_stationnary==None):
+			print 'Error calling', algo, ': features and/or stationnary distribution not given'
+			return 0, 0., 0.
+		
+		D=np.diag(d_stationnary)
+		b=features.T.dot(D.dot(b))
+		A=features.T.dot(D).dot(A).dot(features)
+		I=np.eye(features.shape[1])
+		
+	else:
+		if( not(x_init_ == None)):
+			x_init=np.copy(x_init_)
+		else:
+			x_init=np.zeros(r_pi.shape)
+	
+	start_=time.clock()
+	
+	if(algo=='DP'):
+		#dynamic programming
+		nIter, x_history=dynamicProgramming(I-alpha*A,alpha*b,x_init,nIter_max,history=history)
+		
+	elif(algo=='GD'):
+		#gradient descent with exact linesearch
+		nIter, x_history=gradientDescent(A,b,x_init,nIter_max,history=history)
+		
+	elif(algo=='GD_am'):
+		#gradient descent with adaptive momentum, default parameters
+		nIter, x_history=gradientDescent_adaptiveMomentum(A,b,x_init,nIter_max,history=history)
+		
+	elif(algo=='ADAM'):
+		#gradient descent, ADAM
+		nIter, x_history=ADAM(A,b,x_init,nIter_max,history=history)
+	
+	elif(algo=='AdaGrad'):
+		#gradient descent, AdaGrad
+		nIter, x_history=AdaGrad(A,b,x_init,nIter_max,history=history)
+		
+	elif(algo=='RMSProp'):
+		#gradient descent, RMSProp
+		nIter, x_history=RMSProp(A,b,x_init,nIter_max,history=history)
+		
+	elif(algo=='CG'):
+		#conjugate gradient
+		nIter, x_history=conjugateGradient(A,b,x_init,nIter_max,history=history)
+	elif(algo=='Newton'):
+		nIter, x_history=Newton(A,b,x_init,nIter_max=nIter_max,history=history)
+		
+	end_ = time.clock()
+	
+	if(verbose):
+		print 'Algo:',algo,'\t | Time (s):',end_-start_, '\t | #Iter:', nIter, '\t | T/iter:', (end_-start_)/nIter
+	
+	return nIter,end_-start_,x_history
+
 def dynamicProgramming(P,
 					  r,
 					  x_init,
-					  nIter_max,
+					  nIter_max=0,
 					  tolerance=10.0**(-14),
-						history=True
+						history=False
 					  ):
 	
 	#this function will solve the Bellman Equation x = Px + r
@@ -43,9 +120,9 @@ def dynamicProgramming(P,
 def gradientDescent(A,
 					b,
 					x_init,
-					nIter_max,
+					nIter_max=0,
 					tolerance=10.0**(-14),
-					history=True
+					history=False
 				   ):
 	
 	#this function will solve Ax=b by performing gradient descent
@@ -93,11 +170,11 @@ def gradientDescent(A,
 def gradientDescent_adaptiveMomentum(A,
 					b,
 					x_init,
-					nIter_max,
+					nIter_max=0,
 					g_momentum=0.9,
 					eta=0.1,
 					tolerance=10.0**(-14),
-					history=True
+					history=False
 					):
 	
 	#this function will solve Ax=b by performing gradient descent
@@ -145,12 +222,12 @@ def gradientDescent_adaptiveMomentum(A,
 def ADAM(A,
 		b,
 		x_init,
-		nIter_max,
+		nIter_max=0,
 		eta=0.01,
 		beta1=0.9,
 		beta2=0.99,
 		epsilon=10.0**(-8),
-		history=True ):
+		history=False ):
 	
 	#this function will solve Ax=b by performing gradient descent
 	#on the following quadratic problem : min ||Ax-b||^2
@@ -209,16 +286,14 @@ def ADAM(A,
 	
 def conjugateGradient(A,
 					b,
-					x_init,
-					nIter_max,
+					x_init=None,
+					nIter_max=0,
 					epsilon_CG_a=10.0**(-14),
 					epsilon_CG_r=10.0**(-14),
-					history=True,
+					history=False,
 					pre_cond_given=False,
-					C=0.0
+					C=None
 					):
-	
-	
 	
 	#This function will solve Ax=b by minimizing the error function |Ax-b|^2
 	#When a preconditionner C is given, the function will solve CAx=Cb by minimizing |CAx-Cb|^2
@@ -230,14 +305,14 @@ def conjugateGradient(A,
 	#initial parameters
 	if(pre_cond_given):
 		#use preconditionner
-		if(np.linalg.norm(x_init)==0):
+		if(x_init==None):
 			r=-A.T.dot(C.T.dot(C.dot(b)))
 		else:
 			r=A.T.dot(C.T.dot(C.dot(A.dot(x_init)-b))) #gradient at the initial point
 		
 	else:
 		#no preconditionner was given
-		if(np.linalg.norm(x_init)==0):
+		if(x_init==None):
 			r=-A.T.dot(b)
 		else:
 			r=A.T.dot(A.dot(x_init)-b) #gradient at the initial point
@@ -275,6 +350,7 @@ def conjugateGradient(A,
 				r+= alpha*A.T.dot(q)
 			else:
 				r+= alpha*A.T.dot(C.T.dot(q))
+			
 			beta= r.dot(r)/ r_sqnorm
 			p= - r+beta*p
 		else:
@@ -293,11 +369,11 @@ def conjugateGradient(A,
 def AdaGrad(A,
 			b,
 			x_init,
-			nIter_max,
+			nIter_max=0,
 			eta=0.1,
 			delta=10**(-7),
 			epsilon=10.0**(-8),
-			history=True ):
+			history=False ):
 	
 	if(history):
 		X=np.zeros((nIter_max+1,np.size(x_init)))
@@ -341,12 +417,12 @@ def AdaGrad(A,
 def RMSProp(A,
 			b,
 			x_init,
-			nIter_max,
+			nIter_max=0,
 			eta=0.1,
 			rho=0.99,
 			delta=10**(-7),
 			epsilon=10.0**(-8),
-			history=True ):
+			history=False ):
 	
 	if(history):
 		X=np.zeros((nIter_max+1,np.size(x_init)))
@@ -385,4 +461,28 @@ def RMSProp(A,
 	else:
 		X=x
 	
+	return iter_count, X
+	
+def Newton(A,
+			b,
+			x_init,
+			nIter_max=0,
+			history=False
+			):
+	#this function will solve Ax=b by computing the inverse of A
+	
+	#A is a matrix, not necessarily symetric
+	#b is a vector
+	iter_count=1
+	
+	if(history):
+		X=np.zeros((nIter_max+1,np.size(x_init)))
+	
+	x=np.linalg.inv(A).dot(b)
+	
+	if(history):
+		X[range(iter_count+1,nIter_max+1),:]=x
+	else:
+		X=x
+		
 	return iter_count, X
