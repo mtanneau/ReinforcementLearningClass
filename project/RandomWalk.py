@@ -9,38 +9,54 @@ import algos_QP
 
 class Random_walk:
 	
-	def __init__(self,gamma, nState, nAction, behaviour_policy, d_init, feature_matrix=None):
+	def __init__(self,gamma=0., nState=0, nStep=0, nAction=0, nFeatures=0, behaviour_policy=None, r_pi=None, d_init=None, feature_matrix=None):
 		
 		#discount factor
 		self.gamma=gamma
 		
 		#state and action space
 		self.nState=nState
+		self.nStep=nStep
 		self.nAction=nAction
 		
 		#behaviour policy
-		self.policy=behaviour_policy
+		if(behaviour_policy==None):
+			self.policy=Random_walk.compute_policy(nState,nStep)[0]
+		else:
+			self.policy=behaviour_policy
 		
-		#feature matrix
-		self.Phi=feature_matrix
-		
-		#transition matrix and reward vector
-		#self.P_pi = np.zeros((nState+1,nState+1))
-		#self.r_pi=np.zeros(nState+1)
-		#self.compute_MDP()
+		self.r_pi=r_pi
 		
 		#initial state distribution
 		self.d_init=d_init
-		#self.d_stationnary=self.d_init
-		#self.compute_stationnary_distribution()
+		
+		#stationnary distribution under behaviour policy
+		self.compute_stationnary_distribution()
+		
+		#features
+		if(feature_matrix==None):
+			self.Phi=Random_walk.compute_features(nState,nFeatures)
+		else:
+			self.Phi=feature_matrix
+			
+		self.nFeatures=self.Phi.shape[1]-1	
+		
+		self.Q = np.linalg.inv(self.Phi.T.dot(np.diag(self.d_stationnary).dot(self.Phi)))
+		self.A_approx = self.Phi.T.dot(np.diag(self.d_stationnary).dot(np.eye(self.nState+1)-self.gamma*self.policy).dot(self.Phi))
+		self.b_approx = self.Phi.T.dot(self.d_stationnary*self.r_pi)
+		
+
 		
 		#current state
 		self.current_state=np.random.choice(np.arange(self.nState+1),p=self.d_init)
-		
-		#features
-		if(not feature_matrix==None)
-			self.nFeatures=feature_matrix.shape[1]-1
+		self.perform_transition()
 
+	def MSPBE(self,theta):
+		
+		
+		s=(self.A_approx.dot(theta.T)).T-self.b_approx
+		return np.sum(np.multiply(s.T,(self.Q).dot(s.T)),0)
+	
 	@staticmethod
 	def compute_policy(nState, nStep):
 		
@@ -94,7 +110,7 @@ class Random_walk:
 		a=np.random.choice(np.arange(self.nAction+1),p=self.policy[s_now,:])
 		
 		#probability that this action be taken under behaviour policy
-		mu=self.policy(s_now,a) 
+		mu=self.policy[s_now,a]
 		
 		#compute new state
 		#here, the action gives the new state directly
@@ -105,7 +121,7 @@ class Random_walk:
 			r=0
 			self.current_state=s_new
 		else:
-			if(self.state<self.nStep):
+			if(self.current_state<self.nStep):
 				r=-1
 			else:
 				r=1
@@ -113,17 +129,22 @@ class Random_walk:
 			self.restart()
 		
 		return s_now,s_new,self.Phi[s_now,:],self.Phi[s_new,:],r, mu
-
-	def create_features(self):
+	
+	@staticmethod
+	def compute_features(nState, nFeatures):
 		"""Compute features matrix"""
 		
+		if(nState % nFeatures >0):
+			print 'Error : nState must be a multiple of nFeatures'
+			return 0
+		
 		#Compute the feature matrix by aggregating states
-		self.Phi=np.vstack((np.zeros(self.nFeatures),np.kron(np.eye(self.nFeatures),np.ones((self.nState/self.nFeatures,1)))))
-		u=np.zeros(self.nState+1).reshape((self.nState+1,1))
+		Phi=np.vstack((np.zeros(nFeatures),np.kron(np.eye(nFeatures),np.ones((nState/nFeatures,1)))))
+		u=np.zeros(nState+1).reshape((nState+1,1))
 		u[0]=1
-		self.Phi=np.hstack((u,self.Phi))
+		Phi=np.hstack((u,Phi))
 
-		return 
+		return Phi
 
 	def compute_stationnary_distribution(self,nIter=150):
 		"""Compute the stationnary distribution of the MDP"""
@@ -133,7 +154,7 @@ class Random_walk:
 		b[self.nState+1]=1.
 
 		#tweak the transition matrix, otherwise all the mass goes to the terminal state
-		M=self.P_pi
+		M=self.policy
 		M[0,:]=self.d_init
 
 		M=np.eye(self.nState+1)-M.T
@@ -208,6 +229,15 @@ class Random_walk:
 			theta_history=self.TDC_ADAM(nIter_max,alpha_=alpha_,beta_=beta_,gamma_=gamma_,
 								   zeta_=zeta_,eta_=eta_,
 								   momentum=momentum)
+								   
+		elif(algo=='TDC_RMSProp'):
+			#TD with gradient correction
+			theta_history=self.TDC_RMSProp(nIter_max,alpha_=alpha_,beta_=beta_,gamma_=gamma_,
+								   zeta_=zeta_,eta_=eta_,
+								   momentum=momentum)
+								   
+		elif(algo=='LBFGS'):
+			theta_history=self.LBFGS(nIter_max,alpha_=alpha_,beta_=beta_)
 			
 		else:
 			print 'Error :',algo,'is an unknown algorithm'
@@ -225,14 +255,14 @@ class Random_walk:
 		theta=np.zeros(self.nFeatures+1)
 		theta_history=np.zeros((nIter_max+1,self.nFeatures+1))
 		delta_history=np.zeros((nIter_max+1,self.nFeatures+1))
- 
+		
+		alpha=alpha_
+		
 		for k in range(1,nIter_max+1):
 			
 			#perform transition	
 			s_now,s_new,phi_now,phi_new,reward, rho =self.perform_transition()
 			delta = reward+self.gamma*theta.dot(phi_new)-theta.dot(phi_now)
-
-			alpha=alpha_/(1.+0.01*k**(zeta_))
 			
 			#update parameter
 			theta += alpha*delta*phi_now
@@ -253,10 +283,9 @@ class Random_walk:
 		theta_history=np.zeros((nIter_max+1,self.nFeatures+1))
 		
 		w=np.zeros(self.nFeatures+1)
+		v=np.zeros(self.nFeatures+1)
 		alpha=alpha_
 		beta=beta_
-		
-		cos_phi=np.zeros(nIter_max+1)
 		
 		for k in range(1,nIter_max+1):
 			
@@ -264,11 +293,30 @@ class Random_walk:
 			s_now,s_new,phi_now,phi_new,reward, rho=self.perform_transition()
 			delta = reward+self.gamma*theta.dot(phi_new)-theta.dot(phi_now)
 			
-			#update parameter
+			#compute gradient estimate
 			g=-(phi_now.T.dot(w))*(phi_now-self.gamma*phi_new)
-			delta_theta = alpha*(phi_now.T.dot(w))*(phi_now-self.gamma*phi_new)
+			
+			#compute parameters update
+			delta_w = beta*(delta* phi_now - w)
+			
+			if(momentum=='None'):
+				#No momentum
+				delta_theta = alpha*(phi_now.T.dot(w))*(phi_now-self.gamma*phi_new)
+				
+			elif(momentum=='Nesterov'):
+				#Nesterov Momentum
+				
+				#update velocity
+				v=gamma_*v-alpha_*g_nesterov
+				delta_theta=v
+				
+			else:
+				#Regular momentum
+				v=gamma_*v-alpha_*g
+				delta_theta=v
+			
 			theta += delta_theta
-			w+=beta*(delta* phi_now - w)
+			w+=delta_w
 			
 			theta_history[k,:]=theta
 		
@@ -328,8 +376,8 @@ class Random_walk:
 		return theta_history
 	
 	def TDC(self,nIter_max,
-			alpha_=0.1,beta_=0.5,gamma_=0.9,
-			zeta_=0.75,eta_=0.01,
+			alpha_=0.01,beta_=0.05,gamma_=0.9,
+			zeta_=0.1,eta_=0.01,
 			momentum='None'):
 		
 		theta=np.zeros(self.nFeatures+1)
@@ -337,8 +385,12 @@ class Random_walk:
 		
 		w=np.zeros(self.nFeatures+1)
 		v=np.zeros(self.nFeatures+1)
+		#x=np.zeros(self.nFeatures+1)
+		
 		beta=beta_
 		alpha=alpha_
+		zeta=zeta_
+		
 			  
 		for k in range(1,nIter_max+1):
 			
@@ -350,13 +402,13 @@ class Random_walk:
 			g=-delta*phi_now +self.gamma*(phi_now.T.dot(w))*phi_new
 			
 			#Compute parameters updates
-			#beta=alpha_/(k**(zeta_+eta_))
 			delta_w = beta*(delta-phi_now.dot(w))*phi_now
+			#delta_x = zeta*(reward-(phi_now-gamma_*phi_new).dot(x))*phi_now
 			
 			if(momentum=='None'):
 				#No momentum
-				#alpha=alpha_/(1.+0.01*k**(zeta_))
 				delta_theta=alpha*delta*phi_now -alpha*self.gamma*(phi_now.T.dot(w))*phi_new
+				
 				
 			elif(momentum=='Nesterov'):
 				#Nesterov Momentum
@@ -367,6 +419,7 @@ class Random_walk:
 				#update velocity
 				v=gamma_*v-alpha_*g_nesterov
 				delta_theta=v
+				#delta_theta=alpha*(x-theta)
 				
 			else:
 				#Regular momentum
@@ -375,8 +428,9 @@ class Random_walk:
 				
 			
 			#Update theta and w
-			theta += delta_theta
+			theta+=delta_theta
 			w+=delta_w
+			#x+=delta_x
 			
 			theta_history[k,:]=theta
 		
@@ -394,6 +448,9 @@ class Random_walk:
 		b_=np.zeros(self.nFeatures+1)
 		
 		for k in range(1,nIter_max+1):
+		
+				
+				
 			s_now,s_new,phi_now,phi_new,reward,rho=self.perform_transition()
 			#print k, s_now, s_new, reward
 			
@@ -401,7 +458,6 @@ class Random_walk:
 			
 			A_inv=A_inv - np.outer(A_inv.dot(phi_now),v) / (1.0+v.T.dot(phi_now))
 			b_+=reward*phi_now
-			
 			
 			theta=A_inv.dot(b_)
 			#print k, theta
@@ -418,10 +474,6 @@ class Random_walk:
 			 ):
 		
 		m=int(np.sqrt(self.nFeatures+1))/2
-		#m=nIter_max
-		#m=100
-		#m=10
-		theta_true=np.linalg.inv(self.A_approx).dot(self.b_approx)
 		
 		rnd_gen=np.random.RandomState()
 		rnd_gen.seed(0)
@@ -433,42 +485,30 @@ class Random_walk:
 		
 		batch=[() for i in range(batch_size)]
 		
-		#batch_phi_now=np.zeros((m,self.nFeatures+1))
-		#batch_phi_new=np.zeros((m,self.nFeatures+1))
-		#batch_reward=np.zeros(m)
-		
 		memory_b=np.zeros((m+1,self.nFeatures+1))
 		memory_B_phi=np.zeros((m+1,m+1,self.nFeatures+1))
 		
-		b_bis=np.zeros(self.nFeatures+1)
-		d_history=np.nan*np.ones((nIter_max+1,self.nFeatures+1))
-		theta_target_history=np.nan*np.ones((nIter_max+1,self.nFeatures+1))
-	
 		count=0.
 		delta=0.1
-		
 		for k in range(1,batch_size+1):
 			s_now,s_new,phi_now,phi_new,reward,rho=self.perform_transition()
 			batch[k-1]=(phi_now,phi_new,reward)
-			b_bis+=(1./k)*(reward*phi_now-b_bis)
 		
 		for k in range(batch_size,nIter_max+1):
 			
 			#observe transition
 			s_now,s_new,phi_now,phi_new,reward,rho=self.perform_transition()
 			
-			#update b
-			b_bis+=(1./k)*(reward*phi_now-b_bis)
-					
-				
-			index=rnd_gen.randint(batch_size,size=m+1)
-			
 			#update the batch
 			#the new transition replaces a random old one
-			batch[index[m]]=(phi_now,phi_new,reward)
-			#print k, index
 			
-			if( (k%(m)==0 and (k>=m)) or True):
+			idx=rnd_gen.randint(batch_size)
+			batch[idx]=(phi_now,phi_new,reward)
+			
+			#sample minibatch
+			index=rnd_gen.choice(np.arange(batch_size),size=m,replace=False)
+			
+			if( (k%(m)==0 and (k>=m)) ):
 				
 				memory_b=np.zeros((m+1,self.nFeatures+1))
 				memory_B_phi=np.zeros((m+1,m+1,self.nFeatures+1))
@@ -477,7 +517,6 @@ class Random_walk:
 				
 				#Initialize B_0 * Phi_l, forall l
 				# memory_B_phi[t,l,:] is B_t * Phi_l
-				A=np.zeros((self.nFeatures+1,self.nFeatures+1))
 				for l in range(m):
 					transition=batch[index[l]]
 					phi_now=transition[0]
@@ -485,13 +524,12 @@ class Random_walk:
 					reward=transition[2]
 					memory_B_phi[0,l+1,:]=(1./epsilon)*phi_now
 					b_+=reward*phi_now
-					A+=np.outer(phi_now, phi_now-self.gamma*phi_new)
 					
 				#print count, b_
 				memory_b[0,:]=(1./epsilon)*b_
-				#memory_b[0,:]=(m/(epsilon))*b_bis
+				#memory_b[0,:]=(m/epsilon)*self.b_approx
 				
-				#now, iteratively compute A^{-1}*b
+				#now, iteratively compute (eI+A)^{-1}*b
 				for t in range(1,m+1):
 					
 					transition=batch[index[t-1]]
@@ -502,7 +540,6 @@ class Random_walk:
 					u=phi_now-self.gamma*phi_new
 					w=memory_B_phi[t-1,t,:]
 					for l in range(t,m+1):
-						
 						v=memory_B_phi[t-1,l,:]
 						memory_B_phi[t,l,:]=v-((u.dot(v))/(1.+u.dot(w)))*(w)
 					
@@ -512,47 +549,13 @@ class Random_walk:
 					#Compute B_t * b
 					memory_b[t,:]=v - ((u.dot(v))/(1.+u.dot(w)))*(w)
 					
-					#print t, memory_b[t,:]
-					
-					
-				#Restrict the magnitude of updates (similar to using trust-region)
+				
+				#Compute the update
 				theta_target=memory_b[m,:]
-				theta_target_history[k]=theta_target
-				#d=memory_b[m,:]-theta
-				#d_=np.linalg.inv(epsilon*np.eye(self.nFeatures+1)+A).dot(m*b_bis)
-				#d_true=-theta+theta_true
-				#print k, theta_target
-				
-				#update step size
-				#d_before=d_history[k-1]
-				#cos_=d.dot(d_before)/(np.linalg.norm(d)*(np.linalg.norm(d_before)))
-				#print count, cos_
-				#if(cos_<0):
-					#print count, 'Reducing trust radius', cos_
-					#delta=0.9*delta
-				
-				#compute step size
-				#d=delta*d/np.linalg.norm(d)
-				
-				#print count, d.dot(d_true)/(np.linalg.norm(d)*np.linalg.norm(d_true)), cos_
-				
-				#d_history[k]=d
 				theta+=(1./count)*(theta_target-theta)
-				
-				
 			
+						
 			theta_history[k,:]=theta
-			
-		#print 'LLSTD-count',count
-		
-		#print np.nanmean(theta_target_history,0)
-		#print np.nanstd(theta_history,0)
-		
-		# plt.plot(b_bis,'b-')
-		# plt.plot(self.b_approx,'r--')
-		plt.plot(np.nanmean(theta_target_history,0))
-		plt.plot(theta_true,'r--')
-		plt.show()
 		
 		return theta_history
 	
@@ -584,7 +587,55 @@ class Random_walk:
 			r+=np.multiply(g,g)
 			
 			#Compute updates
-			delta_theta = -(alpha_/(10**(-7)+np.sqrt(r)))*g
+			alpha=(alpha_/(10**(-7)+np.sqrt(r)))
+			beta=5.*alpha
+			delta_theta = -alpha*g
+			delta_w = beta*(delta-phi_now.dot(w))*phi_now
+			
+			#Update theta and w
+			theta += delta_theta
+			w+=delta_w
+			
+			theta_history[k,:]=theta
+		
+		return theta_history
+		
+	def TDC_RMSProp(self,nIter_max,
+			alpha_=0.1,beta_=0.5,gamma_=0.9,
+			zeta_=0.75,eta_=0.01,
+			rho_=0.3,
+			momentum='None'):
+		
+		theta=np.zeros(self.nFeatures+1)
+		
+		theta_history=np.zeros((nIter_max+1,self.nFeatures+1))
+		
+		w=np.zeros(self.nFeatures+1)
+		v=np.zeros(self.nFeatures+1)
+		r=np.zeros(self.nFeatures+1)
+		
+		beta=beta_
+		alpha=alpha_
+
+		for k in range(1,nIter_max+1):
+			
+			#perform transition	
+			s_now,s_new,phi_now,phi_new,reward,rho=self.perform_transition()
+			delta = reward+self.gamma*theta.dot(phi_new)-theta.dot(phi_now)
+			
+			#compute gradient estimate
+			g=-delta*phi_now +self.gamma*(phi_now.T.dot(w))*phi_new
+			
+			#accumulate squarred gradients
+			r=rho_*r+(1.-rho_)*np.multiply(g,g)
+			
+			#Compute velocity update
+			alpha=alpha_/np.sqrt(10**(-8)+r)
+			v=gamma_*v-np.multiply(alpha,g)
+			delta_theta=v
+			
+			#compute parameter update
+			beta=3*alpha
 			delta_w = beta*(delta-phi_now.dot(w))*phi_now
 			
 			#Update theta and w
@@ -646,3 +697,72 @@ class Random_walk:
 			theta_history[k,:]=theta
 		
 		return theta_history
+	
+	def LBFGS(self,nIter_max,
+			alpha_=0.01,beta_=0.05,
+			m=100):
+		
+		theta=np.zeros(self.nFeatures+1)
+		theta_history=np.zeros((nIter_max+1,self.nFeatures+1))
+		
+		w=np.zeros(self.nFeatures+1)
+		
+		beta=beta_
+		alpha=alpha_
+		
+		#trust radius
+		trust_radius=0.01
+		
+		batch_s=np.zeros((nIter_max+1,self.nFeatures+1))
+		batch_y=np.zeros((nIter_max+1,self.nFeatures+1))
+		batch_rho=np.zeros(nIter_max+1)
+		a=np.zeros(nIter_max+1)
+			  
+		for k in range(1,nIter_max+1):
+			
+			#perform transition
+			s_now,s_new,phi_now,phi_new,reward,rho=self.perform_transition()
+			delta = reward+self.gamma*theta.dot(phi_new)-theta.dot(phi_now)
+			
+			#compute gradient estimate
+			g=-delta*phi_now +self.gamma*(phi_now.T.dot(w))*phi_new
+			
+			#two-loop recursion
+			q=g
+			
+			for i in range(k-1,max([0,k-m])-1,-1):
+				a[i]=batch_rho[i]*batch_s[i].dot(q)
+				q+= -a[i]*batch_y[i]
+			
+			r=((batch_s[k-1].dot(batch_y[k-1]))/(10**-8+batch_y[k-1].dot(batch_y[k-1])))*q
+			r=10.*q
+			for i in range(k-m,k):
+				b=batch_rho[i]*batch_y[i].dot(r)
+				r+=(a[i]-b)*batch_s[i]
+			#r ~ H*
+			
+			#reduce step siwe if two large
+			delta_theta=-r
+			if(np.linalg.norm(delta_theta)>trust_radius):
+				#print k, 'Step too large', np.linalg.norm(delta_theta),'>', trust_radius
+				delta_theta=trust_radius*delta_theta/(np.linalg.norm(delta_theta))
+			
+			
+			
+			#Compute parameters updates
+			delta_w = beta*(delta-phi_now.dot(w))*phi_now
+			
+			#Update theta and w
+			theta+=delta_theta
+			w+=delta_w
+			
+			batch_s[k-1]=delta_theta
+			batch_y[k]=g-batch_y[k-1]
+			batch_rho[k]=min([10000.,1./((10**-4)+batch_y[k].dot(batch_s[k]))])
+			
+			theta_history[k,:]=theta
+		
+		return theta_history
+		
+		
+	

@@ -20,21 +20,26 @@ def compute_valueFunction(P_pi,r_pi,discountFactor,
 	
 	if(approx):
 		
-		#compute approximate solution of bellamn equation
+		#compute approximate solution of bellman equation
 		
 		if( not(x_init_ == None)):
 			x_init=np.copy(x_init_)
 		else:
 			x_init=np.zeros(features.shape[1])
+			#x_init=np.random.rand(features.shape[1])
 		
-		if(features==None or d_stationnary==None):
+		if(algo=='DP' and(features==None or d_stationnary==None)):
 			print 'Error calling', algo, ': features and/or stationnary distribution not given'
 			return 0, 0., 0.
 		
-		D=np.diag(d_stationnary)
-		b=features.T.dot(D.dot(b))
-		A=features.T.dot(D).dot(A).dot(features)
-		I=np.eye(features.shape[1])
+		if(algo=='DP'):
+			D=np.diag(d_stationnary)
+			b=features.T.dot(D.dot(b))
+			A=features.T.dot(D).dot(A).dot(features)
+			I=np.eye(features.shape[1])
+		else:
+			A=A.dot(features)
+		
 		
 	else:
 		if( not(x_init_ == None)):
@@ -71,13 +76,15 @@ def compute_valueFunction(P_pi,r_pi,discountFactor,
 	elif(algo=='CG'):
 		#conjugate gradient
 		nIter, x_history=conjugateGradient(A,b,x_init,nIter_max,history=history)
+		
 	elif(algo=='Newton'):
+		#Newton method (conpute an inverse)
 		nIter, x_history=Newton(A,b,x_init,nIter_max=nIter_max,history=history)
 		
 	end_ = time.clock()
 	
 	if(verbose):
-		print 'Algo:',algo,'\t | Time (s):',end_-start_, '\t | #Iter:', nIter, '\t | T/iter:', (end_-start_)/nIter
+		print 'Algo:',algo,'\t | Time (s):',end_-start_, '\t | #Iter:', nIter, '\t | T/iter:', (end_-start_)/(nIter)
 	
 	return nIter,end_-start_,x_history
 
@@ -261,8 +268,8 @@ def ADAM(A,
 		g=A.T.dot(A.dot(x)-b)
 		
 		#update 
-		m=beta1*m+(1-beta1)*g
-		v=beta2*v+(1-beta2)*np.multiply(g,g)
+		m=beta1*m+(1.-beta1)*g
+		v=beta2*v+(1.-beta2)*np.multiply(g,g)
 		
 		#correct the bias
 		m_hat=m/(1.0-beta1_k)
@@ -327,6 +334,7 @@ def conjugateGradient(A,
 	iter_count=0
 	
 	for k in range(1,nIter_max+1):
+		
 		r_sqnorm=r.dot(r)
 		keep_going=(np.sqrt(r_sqnorm) > epsilon_CG_a+epsilon_CG_r*r_0_norm)
 		
@@ -418,8 +426,8 @@ def RMSProp(A,
 			b,
 			x_init,
 			nIter_max=0,
-			eta=0.1,
-			rho=0.99,
+			eta=0.01,
+			rho=0.9,
 			delta=10**(-7),
 			epsilon=10.0**(-8),
 			history=False ):
@@ -481,7 +489,7 @@ def Newton(A,
 	x=np.linalg.inv(A).dot(b)
 	
 	if(history):
-		X[range(iter_count+1,nIter_max+1),:]=x
+		X[range(1,nIter_max+1),:]=x
 	else:
 		X=x
 		
